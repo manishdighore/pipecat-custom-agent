@@ -90,30 +90,31 @@ startBtn.addEventListener('click', async () => {
                     const text = data.text || '';
                     const isFinal = data.final || false;
                     
+                    // Skip final transcripts - we'll finalize on UserStoppedSpeaking
+                    if (isFinal) {
+                        return;
+                    }
+                    
                     if (text) {
-                        if (isFinal) {
-                            // Final - update existing or create new
-                            if (currentUserMessage) {
-                                updateMessage(currentUserMessage, text, false);
-                                currentUserMessage = null;
-                            } else {
-                                addMessage(text, 'user', false);
-                            }
+                        // Only show partial/streaming transcripts
+                        if (!currentUserMessage) {
+                            currentUserMessage = addMessage(text, 'user', true);
                         } else {
-                            // Partial - stream it
-                            if (!currentUserMessage) {
-                                currentUserMessage = addMessage(text, 'user', true);
-                            } else {
-                                updateMessage(currentUserMessage, text, true);
-                            }
+                            updateMessage(currentUserMessage, text, true);
                         }
                     }
                 },
                 onBotTranscript: (data) => {
+                    // Not used
+                },
+                onBotLlmText: (data) => {
+                    // Not used
+                },
+                onBotTtsText: (data) => {
                     const text = data.text || '';
                     
                     if (text) {
-                        // Use transcript as fallback if LLM text not available
+                        // Stream TTS text - accumulate in one message
                         if (!currentAgentMessage) {
                             currentAgentMessage = addMessage(text, 'agent', true);
                         } else {
@@ -121,22 +122,6 @@ startBtn.addEventListener('click', async () => {
                             updateMessage(currentAgentMessage, currentText + ' ' + text, true);
                         }
                     }
-                },
-                onBotLlmText: (data) => {
-                    const text = data.text || '';
-                    
-                    if (text) {
-                        // Stream LLM tokens - accumulate in one message
-                        if (!currentAgentMessage) {
-                            currentAgentMessage = addMessage(text, 'agent', true);
-                        } else {
-                            const currentText = currentAgentMessage.querySelector('.message-bubble').textContent;
-                            updateMessage(currentAgentMessage, currentText + text, true);
-                        }
-                    }
-                },
-                onBotTtsText: (data) => {
-                    // Not used - we use transcript/LLM text
                 },
                 onUserStartedSpeaking: () => {
                     speakingIndicator.classList.add('active');
