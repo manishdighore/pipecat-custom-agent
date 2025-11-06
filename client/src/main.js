@@ -1,4 +1,4 @@
-﻿import { PipecatClient } from '@pipecat-ai/client-js';
+﻿import { PipecatClient, RTVIEvent } from '@pipecat-ai/client-js';
 import { WebSocketTransport } from '@pipecat-ai/websocket-transport';
 
 console.log('Pipecat client initializing...');
@@ -16,6 +16,7 @@ let client = null;
 let isConnected = false;
 let currentUserMessage = null;
 let currentAgentMessage = null;
+let botAudio = null;
 
 function formatTime() {
     const now = new Date();
@@ -51,53 +52,161 @@ function updateStatus(connected) {
     }
 }
 
+function setupAudioTrack(track) {
+    console.log('🔊 Setting up audio track');
+    if (!botAudio) {
+        botAudio = document.createElement('audio');
+        botAudio.autoplay = true;
+        document.body.appendChild(botAudio);
+    }
+    
+    if (botAudio.srcObject) {
+        const oldTrack = botAudio.srcObject.getAudioTracks()[0];
+        if (oldTrack?.id === track.id) return;
+    }
+    botAudio.srcObject = new MediaStream([track]);
+}
+
+function setupMediaTracks() {
+    if (!client) return;
+    const tracks = client.tracks();
+    console.log('📻 Available tracks:', tracks);
+    if (tracks.bot?.audio) {
+        setupAudioTrack(tracks.bot.audio);
+    }
+}
+
 startBtn.addEventListener('click', async () => {
     try {
         startBtn.disabled = true;
         startBtn.textContent = 'Connecting...';
-        const transport = new WebSocketTransport();
-        client = new PipecatClient(transport, {
-            onUserTranscript: (text) => {
-                console.log(' User:', text);
-                if (!currentUserMessage) {
-                    currentUserMessage = addMessage(text, 'user', true);
-                } else {
-                    updateMessage(currentUserMessage, text, true);
+        
+        client = new PipecatClient({
+            transport: new WebSocketTransport(),
+            enableCam: false,
+            enableMic: true,
+            callbacks: {
+                onUserTranscript: (data) => {
+                    const text = data.text || '';
+                    const isFinal = data.final || false;
+                    
+                    if (text) {
+                        if (isFinal) {
+                            // Final - update existing or create new
+                            if (currentUserMessage) {
+                                updateMessage(currentUserMessage, text, false);
+                                currentUserMessage = null;
+                            } else {
+                                addMessage(text, 'user', false);
+                            }
+                        } else {
+                            // Partial - stream it
+                            if (!currentUserMessage) {
+                                currentUserMessage = addMessage(text, 'user', true);
+                            } else {
+                                updateMessage(currentUserMessage, text, true);
+                            }
+                        }
+                    }
+                },
+                onBotTranscript: (data) => {
+                    const text = data.text || '';
+                    
+                    if (text) {
+                        // Use transcript as fallback if LLM text not available
+                        if (!currentAgentMessage) {
+                            currentAgentMessage = addMessage(text, 'agent', true);
+                        } else {
+                            const currentText = currentAgentMessage.querySelector('.message-bubble').textContent;
+                            updateMessage(currentAgentMessage, currentText + ' ' + text, true);
+                        }
+                    }
+                },
+                onBotLlmText: (data) => {
+                    const text = data.text || '';
+                    
+                    if (text) {
+                        // Stream LLM tokens - accumulate in one message
+                        if (!currentAgentMessage) {
+                            currentAgentMessage = addMessage(text, 'agent', true);
+                        } else {
+                            const currentText = currentAgentMessage.querySelector('.message-bubble').textContent;
+                            updateMessage(currentAgentMessage, currentText + text, true);
+                        }
+                    }
+                },
+                onBotTtsText: (data) => {
+                    // Not used - we use transcript/LLM text
+                },
+                onUserStartedSpeaking: () => {
+                    speakingIndicator.classList.add('active');
+                },
+                onUserStoppedSpeaking: () => {
+                    speakingIndicator.classList.remove('active');
+                    if (currentUserMessage) {
+                        currentUserMessage.querySelector('.message-bubble').classList.remove('streaming');
+                        currentUserMessage = null;
+                    }
+                },
+                onBotStartedSpeaking: () => {
+                    // Bot is speaking (audio playing)
+                },
+                onBotStoppedSpeaking: () => {
+                    if (currentAgentMessage) {
+                        currentAgentMessage.querySelector('.message-bubble').classList.remove('streaming');
+                        currentAgentMessage = null;
+                    }
+                },
+                onConnected: () => {
+                    updateStatus(true);
+                    isConnected = true;
+                    startView.classList.add('hidden');
+                    chatView.classList.remove('hidden');
+                    startBtn.disabled = false;
+                    startBtn.textContent = 'Start Session';
+                },
+                onDisconnected: () => {
+                    console.log('❌ Disconnected');
+                    updateStatus(false);
+                },
+                onBotReady: (data) => {
+                    console.log('🤖 Bot ready:', data);
+                    setupMediaTracks();
+                },
+                onError: (error) => {
+                    console.error('❗ Error:', error);
                 }
-            },
-            onBotTranscript: (text) => {
-                console.log(' Bot:', text);
-                if (!currentAgentMessage) {
-                    currentAgentMessage = addMessage(text, 'agent', true);
-                } else {
-                    updateMessage(currentAgentMessage, text, true);
-                }
-            },
-            onUserStartedSpeaking: () => {
-                console.log(' User speaking');
-                speakingIndicator.classList.add('active');
-                if (currentUserMessage) {
-                    currentUserMessage.querySelector('.message-bubble').classList.remove('streaming');
-                }
-                currentUserMessage = null;
-            },
-            onUserStoppedSpeaking: () => {
-                console.log(' User stopped');
-                speakingIndicator.classList.remove('active');
-                if (currentUserMessage) {
-                    currentUserMessage.querySelector('.message-bubble').classList.remove('streaming');
-                }
-                currentAgentMessage = null;
             }
         });
-        await client.connect({ ws_url: 'ws://localhost:8000/ws' });
-        isConnected = true;
-        updateStatus(true);
-        startView.classList.add('hidden');
-        chatView.classList.remove('hidden');
-        console.log(' Connected');
+        
+        // Set up track listeners
+        client.on(RTVIEvent.TrackStarted, (track, participant) => {
+            if (!participant?.local && track.kind === 'audio') {
+                setupAudioTrack(track);
+            }
+        });
+        
+        // Log ONLY bot and user events to debug transcript issues
+        const botUserEvents = Object.values(RTVIEvent).filter(e => 
+            e.includes('Bot') || e.includes('User') || e.includes('Transcript')
+        );
+        botUserEvents.forEach(eventName => {
+            client.on(eventName, (...args) => {
+                console.log(`🎯 ${eventName}:`, ...args);
+            });
+        });
+        
+        // Initialize devices first
+        console.log('🎙️ Initializing devices...');
+        await client.initDevices();
+        
+        // Connect to WebSocket
+        console.log('🔌 Connecting to WebSocket...');
+        await client.connect({ wsUrl: 'ws://localhost:8000/ws' });
+        // UI updates happen in onConnected callback
+        console.log('Connection request sent');
     } catch (error) {
-        console.error(' Error:', error);
+        console.error('❌ Error:', error);
         startBtn.disabled = false;
         startBtn.textContent = 'Start Session';
         alert(`Connection error: ${error.message}`);
@@ -119,9 +228,16 @@ endBtn.addEventListener('click', async () => {
             speakingIndicator.classList.remove('active');
             startBtn.disabled = false;
             startBtn.textContent = 'Start Session';
-            console.log(' Disconnected');
+            
+            // Clean up audio
+            if (botAudio?.srcObject) {
+                botAudio.srcObject.getAudioTracks().forEach(track => track.stop());
+                botAudio.srcObject = null;
+            }
+            
+            console.log('✅ Disconnected');
         } catch (error) {
-            console.error(' Disconnect error:', error);
+            console.error('❌ Disconnect error:', error);
         }
     }
 });

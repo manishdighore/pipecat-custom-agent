@@ -99,8 +99,17 @@ async def run_voice_agent(websocket: WebSocket):
     user_aggregator = LLMUserContextAggregator(context)
     assistant_aggregator = LLMAssistantContextAggregator(context)
     
-    # RTVI events for Pipecat client UI
-    rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+    # RTVI events for Pipecat client UI with transcription enabled
+    rtvi = RTVIProcessor(
+        config=RTVIConfig(
+            config=[
+                {
+                    "service": "tts",
+                    "options": [{"name": "voice", "value": "en-US-AvaMultilingualNeural"}]
+                }
+            ]
+        )
+    )
     
     # Configure WebSocket transport with Protobuf serializer (required for official client SDK)
     transport = FastAPIWebsocketTransport(
@@ -116,16 +125,16 @@ async def run_voice_agent(websocket: WebSocket):
     
     logger.info("WebSocket transport configured")
     
-    # Build the processing pipeline (Azure STT -> Custom LLM -> Azure TTS)
+    # Build the processing pipeline with RTVI before LLM
     pipeline = Pipeline(
         [
             transport.input(),  # Receive audio from client
             stt,  # Convert speech to text (Azure STT)
             user_aggregator,  # Add user message to context
-            rtvi,  # RTVI events for client UI
+            rtvi,  # RTVI events for client UI (handles transcription events)
             llm,  # Generate response with custom LLM
             tts,  # Convert response to speech (Azure TTS)
-            transport.output(),  # Send audio to client
+            transport.output(),  # Send audio AND transcripts to client
             assistant_aggregator,  # Add assistant response to context
         ]
     )
