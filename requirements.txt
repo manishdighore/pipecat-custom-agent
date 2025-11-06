@@ -1,0 +1,12 @@
+# Pipecat with Azure services support
+pipecat-ai[azure,fastapi]
+
+# Web framework
+fastapi
+uvicorn[standard]
+
+# Environment variables
+python-dotenv
+
+# Logging
+loguru

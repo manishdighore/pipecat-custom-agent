@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipecat Voice Agent Client</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .status {
+            text-align: center;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+
+        .status.disconnected {
+            background: #fee;
+            color: #c33;
+        }
+
+        .status.connecting {
+            background: #ffc;
+            color: #880;
+        }
+
+        .status.connected {
+            background: #efe;
+            color: #3a3;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-connect {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-connect:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-disconnect {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-disconnect:hover:not(:disabled) {
+            background: #c0392b;
+        }
+
+        .btn-talk {
+            background: #2ecc71;
+            color: white;
+            font-size: 18px;
+            padding: 20px;
+        }
+
+        .btn-talk:hover:not(:disabled) {
+            background: #27ae60;
+            transform: scale(1.05);
+        }
+
+        .btn-talk.recording {
+            background: #e74c3c;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7);
+            }
+            50% {
+                box-shadow: 0 0 0 20px rgba(231, 76, 60, 0);
+            }
+        }
+
+        .log {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-left: 3px solid #667eea;
+            padding-left: 10px;
+        }
+
+        .log-entry.error {
+            border-left-color: #e74c3c;
+            color: #c0392b;
+        }
+
+        .log-entry.success {
+            border-left-color: #2ecc71;
+            color: #27ae60;
+        }
+
+        .info-box {
+            background: #e8f4f8;
+            border-left: 4px solid #3498db;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 5px;
+        }
+
+        .info-box h3 {
+            color: #2980b9;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .info-box ul {
+            margin-left: 20px;
+            color: #34495e;
+        }
+
+        .info-box li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Pipecat Voice Agent</h1>
+        <p class="subtitle">Azure STT/TTS with Custom LLM</p>
+
+        <div id="transcriptBox" style="background:#f3f6ff;border-radius:10px;padding:15px;margin-bottom:20px;min-height:32px;font-size:16px;color:#222;box-shadow:0 2px 8px rgba(102,126,234,0.08);">
+            <span id="transcriptLabel" style="color:#667eea;font-weight:600;">Live Transcript:</span>
+            <span id="transcript" style="margin-left:8px;"></span>
+        </div>
+
+        <div id="status" class="status disconnected">
+            Disconnected
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" class="btn-connect">Connect</button>
+            <button id="disconnectBtn" class="btn-disconnect" disabled>Disconnect</button>
+            <button id="startBtn" class="btn-talk" disabled>Start Voice Session</button>
+            <button id="stopBtn" class="btn-disconnect" disabled>Stop Voice Session</button>
+        </div>
+
+        <div class="log" id="log">
+            <div class="log-entry">Ready to connect...</div>
+        </div>
+
+        <div class="info-box">
+            <h3>How to use:</h3>
+            <ul>
+                <li>Click "Connect" to establish the WebSocket connection</li>
+                <li>Press "Start Voice Session" and begin speaking</li>
+                <li>Use "Stop Voice Session" to pause streaming audio</li>
+                <li>Click "Disconnect" when you are finished</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let audioContext = null;
+        let isStreaming = false;
+
+        const statusDiv = document.getElementById('status');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const logDiv = document.getElementById('log');
+        const transcriptDiv = document.getElementById('transcript');
+        let transcriptHistory = [];
+
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateStatus(status, text) {
+            statusDiv.className = `status ${status}`;
+            statusDiv.textContent = text;
+        }
+
+        async function connect() {
+            try {
+                updateStatus('connecting', 'Connecting...');
+                log('Connecting to WebSocket server...');
+
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const defaultHost = 'localhost:8000';
+                const host = window.location.host || defaultHost;
+                const wsUrl = `${protocol}//${host}/ws`;
+                
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    updateStatus('connected', 'Connected');
+                    log('Connected to voice agent', 'success');
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                };
+
+
+                ws.onmessage = async (event) => {
+                    if (event.data instanceof Blob) {
+                        log('Received audio response from agent');
+                        await playAudio(event.data);
+                    } else {
+                        let msg = null;
+                        try { msg = JSON.parse(event.data); } catch {}
+                        if (msg && msg.type === "transcript") {
+                            transcriptDiv.textContent = msg.text;
+                            if (msg.final) {
+                                transcriptHistory.push(msg.text);
+                            }
+                        } else {
+                            log(`Server message: ${event.data}`);
+                        }
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    log(`WebSocket error: ${error}`, 'error');
+                    updateStatus('disconnected', 'Error');
+                };
+
+                ws.onclose = () => {
+                    log('Disconnected from voice agent');
+                    updateStatus('disconnected', 'Disconnected');
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    startBtn.disabled = true;
+                    stopBtn.disabled = true;
+                    stopVoiceSession();
+                    ws = null;
+                };
+
+            } catch (error) {
+                log(`Connection error: ${error.message}`, 'error');
+                updateStatus('disconnected', 'Connection Failed');
+                connectBtn.disabled = false;
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                log('Disconnecting...');
+                startBtn.disabled = true;
+                stopBtn.disabled = true;
+            }
+            stopVoiceSession();
+        }
+
+        async function startVoiceSession() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                log('Microphone access not supported', 'error');
+                return;
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: 1,
+                    sampleRate: 16000,
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                }
+            });
+            audioContext = new AudioContext({ sampleRate: 16000 });
+            const source = audioContext.createMediaStreamSource(stream);
+            const processor = audioContext.createScriptProcessor(4096, 1, 1);
+            isStreaming = true;
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            log('Voice session started');
+            processor.onaudioprocess = (e) => {
+                if (isStreaming) {
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    const pcmData = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                    }
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(pcmData.buffer);
+                    }
+                }
+            };
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+            startBtn.stream = stream;
+            startBtn.processor = processor;
+        }
+
+        function stopVoiceSession() {
+            if (!isStreaming) return;
+            isStreaming = false;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            log('Voice session stopped');
+            if (startBtn.processor) {
+                startBtn.processor.disconnect();
+            }
+            if (startBtn.stream) {
+                startBtn.stream.getTracks().forEach(track => track.stop());
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+        }
+
+        async function playAudio(audioBlob) {
+            try {
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
+                
+                audio.onended = () => {
+                    URL.revokeObjectURL(audioUrl);
+                    log('Finished playing response');
+                };
+
+                await audio.play();
+                log('Playing agent response');
+            } catch (error) {
+                log(`Audio playback error: ${error.message}`, 'error');
+            }
+        }
+
+        // Event listeners
+        connectBtn.addEventListener('click', connect);
+        disconnectBtn.addEventListener('click', disconnect);
+        startBtn.addEventListener('click', startVoiceSession);
+        stopBtn.addEventListener('click', stopVoiceSession);
+        log('Client ready');
+    </script>
+</body>
+</html>

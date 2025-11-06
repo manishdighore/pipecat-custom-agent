@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipecat Voice Agent - WebSocket Client</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .status {
+            text-align: center;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+
+        .status.disconnected {
+            background: #fee;
+            color: #c33;
+        }
+
+        .status.connecting {
+            background: #ffc;
+            color: #880;
+        }
+
+        .status.connected {
+            background: #efe;
+            color: #3a3;
+        }
+
+        .status.ready {
+            background: #dff;
+            color: #088;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-connect {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-connect:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-disconnect {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-disconnect:hover:not(:disabled) {
+            background: #c0392b;
+        }
+
+        .log {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-left: 3px solid #667eea;
+            padding-left: 10px;
+        }
+
+        .log-entry.error {
+            border-left-color: #e74c3c;
+            color: #c0392b;
+        }
+
+        .log-entry.success {
+            border-left-color: #2ecc71;
+            color: #27ae60;
+        }
+
+        .info-box {
+            background: #e8f4f8;
+            border-left: 4px solid #3498db;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 5px;
+        }
+
+        .info-box h3 {
+            color: #2980b9;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .info-box ul {
+            margin-left: 20px;
+            color: #34495e;
+        }
+
+        .info-box li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Pipecat Voice Agent</h1>
+        <p class="subtitle">Azure STT/TTS with Custom LLM (WebSocket)</p>
+
+        <div id="status" class="status disconnected">
+            Disconnected
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" class="btn-connect">Connect</button>
+            <button id="disconnectBtn" class="btn-disconnect" disabled>Disconnect</button>
+        </div>
+
+        <div class="log" id="log">
+            <div class="log-entry">Ready to connect...</div>
+        </div>
+
+        <div class="info-box">
+            <h3>How to use:</h3>
+            <ul>
+                <li>Click "Connect" to start the voice session</li>
+                <li>Speak naturally - the bot will listen and respond</li>
+                <li>Voice Activity Detection (VAD) automatically detects when you're speaking</li>
+                <li>Click "Disconnect" when finished</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Load Pipecat SDK from CDN (using unpkg for simplicity) -->
+    <script type="module">
+        // Import Pipecat SDK and WebSocket transport
+        import { PipecatClient } from 'https://cdn.jsdelivr.net/npm/@pipecat-ai/client-js@latest/dist/index.js';
+        import { WebSocketTransport } from 'https://cdn.jsdelivr.net/npm/@pipecat-ai/websocket-transport@latest/dist/index.js';
+
+        const statusDiv = document.getElementById('status');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const logDiv = document.getElementById('log');
+
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateStatus(status, text) {
+            statusDiv.className = `status ${status}`;
+            statusDiv.textContent = text;
+        }
+
+        // Create Pipecat client with WebSocket transport
+        const pcClient = new PipecatClient({
+            transport: new WebSocketTransport(),
+            enableMic: true,
+            enableCam: false,
+            callbacks: {
+                onConnected: () => {
+                    log('WebSocket connected', 'success');
+                    updateStatus('connected', 'Connected');
+                },
+                onDisconnected: () => {
+                    log('Disconnected from bot');
+                    updateStatus('disconnected', 'Disconnected');
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                },
+                onTransportStateChanged: (state) => {
+                    log(`Transport state: ${state}`);
+                    if (state === 'ready') {
+                        updateStatus('ready', 'Bot Ready - Speak Now!');
+                    }
+                },
+                onBotReady: () => {
+                    log('Bot is ready!', 'success');
+                    updateStatus('ready', 'Bot Ready - Speak Now!');
+                },
+                onError: (error) => {
+                    log(`Error: ${error.message}`, 'error');
+                    updateStatus('disconnected', 'Error');
+                },
+            },
+        });
+
+        // Connect button handler
+        connectBtn.addEventListener('click', async () => {
+            try {
+                updateStatus('connecting', 'Connecting...');
+                log('Initializing devices...');
+                
+                // Initialize audio devices first
+                await pcClient.initDevices();
+                log('Devices initialized', 'success');
+                
+                // Connect to WebSocket server
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const host = window.location.host || 'localhost:8000';
+                const wsUrl = `${protocol}//${host}/ws`;
+                
+                log(`Connecting to ${wsUrl}...`);
+                await pcClient.connect({ url: wsUrl });
+                
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                log('Connected! Start speaking...', 'success');
+            } catch (error) {
+                log(`Connection failed: ${error.message}`, 'error');
+                updateStatus('disconnected', 'Connection Failed');
+                connectBtn.disabled = false;
+            }
+        });
+
+        // Disconnect button handler
+        disconnectBtn.addEventListener('click', async () => {
+            try {
+                log('Disconnecting...');
+                await pcClient.disconnect();
+            } catch (error) {
+                log(`Disconnect error: ${error.message}`, 'error');
+            }
+        });
+
+        log('Pipecat client initialized and ready');
+    </script>
+</body>
+</html>
