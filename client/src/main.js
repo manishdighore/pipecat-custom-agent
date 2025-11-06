@@ -1,92 +1,135 @@
-import { PipecatClient } from '@pipecat-ai/client-js';
+﻿import { PipecatClient } from '@pipecat-ai/client-js';
 import { WebSocketTransport } from '@pipecat-ai/websocket-transport';
 
-const statusDiv = document.getElementById('status');
-const connectBtn = document.getElementById('connectBtn');
-const disconnectBtn = document.getElementById('disconnectBtn');
-const logDiv = document.getElementById('log');
+console.log('Pipecat client initializing...');
 
-function log(message, type = 'info') {
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${type}`;
-    entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-    logDiv.appendChild(entry);
-    logDiv.scrollTop = logDiv.scrollHeight;
+const startView = document.getElementById('startView');
+const chatView = document.getElementById('chatView');
+const startBtn = document.getElementById('startBtn');
+const endBtn = document.getElementById('endBtn');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const messagesContainer = document.getElementById('messagesContainer');
+const speakingIndicator = document.getElementById('speakingIndicator');
+
+let client = null;
+let isConnected = false;
+let currentUserMessage = null;
+let currentAgentMessage = null;
+
+function formatTime() {
+    const now = new Date();
+    return now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
-function updateStatus(status, text) {
-    statusDiv.className = `status ${status}`;
-    statusDiv.textContent = text;
+function addMessage(text, type, isStreaming = false) {
+    const message = document.createElement('div');
+    message.className = `message ${type}`;
+    const icon = type === 'user' ? '' : '';
+    const label = type === 'user' ? 'You' : 'Agent';
+    message.innerHTML = `<div class="message-header"><span class="message-icon">${icon}</span><span>${label}</span></div><div class="message-bubble ${isStreaming ? 'streaming' : ''}">${text}</div><div class="timestamp">${formatTime()}</div>`;
+    messagesContainer.appendChild(message);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    return message;
 }
 
-// Create Pipecat client
-const pcClient = new PipecatClient({
-    transport: new WebSocketTransport(),
-    enableMic: true,
-    enableCam: false,
-    callbacks: {
-        onConnected: () => {
-            log('WebSocket connected', 'success');
-            updateStatus('connected', 'Connected');
-        },
-        onDisconnected: () => {
-            log('Disconnected');
-            updateStatus('disconnected', 'Disconnected');
-            connectBtn.disabled = false;
-            disconnectBtn.disabled = true;
-        },
-        onTransportStateChanged: (state) => {
-            log(`State: ${state}`);
-            if (state === 'ready') {
-                updateStatus('ready', 'Ready - Speak!');
-            }
-        },
-        onBotReady: () => {
-            log('Bot ready!', 'success');
-            updateStatus('ready', 'Bot Ready');
-        },
-        onUserTranscript: (data) => {
-            log(`🎤 YOU: ${data.text}`, 'success');
-        },
-        onBotTranscript: (data) => {
-            log(`🤖 BOT: ${data.text}`, 'info');
-        },
-        onUserStartedSpeaking: () => {
-            log('🎙️ Listening...', 'info');
-        },
-        onUserStoppedSpeaking: () => {
-            log('🎙️ Processing...', 'info');
-        },
-        onError: (error) => {
-            log(`Error: ${error.message}`, 'error');
-        },
-    },
-});
+function updateMessage(messageElement, text, isStreaming = false) {
+    const bubble = messageElement.querySelector('.message-bubble');
+    bubble.textContent = text;
+    bubble.className = `message-bubble ${isStreaming ? 'streaming' : ''}`;
+    messageElement.querySelector('.timestamp').textContent = formatTime();
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
 
-connectBtn.addEventListener('click', async () => {
+function updateStatus(connected) {
+    if (connected) {
+        statusDot.classList.add('connected');
+        statusText.textContent = 'Connected';
+    } else {
+        statusDot.classList.remove('connected');
+        statusText.textContent = 'Disconnected';
+    }
+}
+
+startBtn.addEventListener('click', async () => {
     try {
-        updateStatus('connecting', 'Connecting...');
-        log('Initializing...');
-        
-        await pcClient.initDevices();
-        log('Devices OK', 'success');
-        
-        const wsUrl = `ws://localhost:8000/ws`;
-        log(`Connecting to ${wsUrl}...`);
-        
-        await pcClient.connect({ ws_url: wsUrl });  // Use ws_url parameter
-        
-        connectBtn.disabled = true;
-        disconnectBtn.disabled = false;
+        startBtn.disabled = true;
+        startBtn.textContent = 'Connecting...';
+        const transport = new WebSocketTransport();
+        client = new PipecatClient(transport, {
+            onUserTranscript: (text) => {
+                console.log(' User:', text);
+                if (!currentUserMessage) {
+                    currentUserMessage = addMessage(text, 'user', true);
+                } else {
+                    updateMessage(currentUserMessage, text, true);
+                }
+            },
+            onBotTranscript: (text) => {
+                console.log(' Bot:', text);
+                if (!currentAgentMessage) {
+                    currentAgentMessage = addMessage(text, 'agent', true);
+                } else {
+                    updateMessage(currentAgentMessage, text, true);
+                }
+            },
+            onUserStartedSpeaking: () => {
+                console.log(' User speaking');
+                speakingIndicator.classList.add('active');
+                if (currentUserMessage) {
+                    currentUserMessage.querySelector('.message-bubble').classList.remove('streaming');
+                }
+                currentUserMessage = null;
+            },
+            onUserStoppedSpeaking: () => {
+                console.log(' User stopped');
+                speakingIndicator.classList.remove('active');
+                if (currentUserMessage) {
+                    currentUserMessage.querySelector('.message-bubble').classList.remove('streaming');
+                }
+                currentAgentMessage = null;
+            }
+        });
+        await client.connect({ ws_url: 'ws://localhost:8000/ws' });
+        isConnected = true;
+        updateStatus(true);
+        startView.classList.add('hidden');
+        chatView.classList.remove('hidden');
+        console.log(' Connected');
     } catch (error) {
-        log(`Failed: ${error.message}`, 'error');
-        updateStatus('disconnected', 'Failed');
-        connectBtn.disabled = false;
+        console.error(' Error:', error);
+        startBtn.disabled = false;
+        startBtn.textContent = 'Start Session';
+        alert(`Connection error: ${error.message}`);
     }
 });
 
-disconnectBtn.addEventListener('click', async () => {
-    await pcClient.disconnect();
+endBtn.addEventListener('click', async () => {
+    if (client && isConnected) {
+        try {
+            await client.disconnect();
+            client = null;
+            isConnected = false;
+            updateStatus(false);
+            chatView.classList.add('hidden');
+            startView.classList.remove('hidden');
+            messagesContainer.innerHTML = '';
+            currentUserMessage = null;
+            currentAgentMessage = null;
+            speakingIndicator.classList.remove('active');
+            startBtn.disabled = false;
+            startBtn.textContent = 'Start Session';
+            console.log(' Disconnected');
+        } catch (error) {
+            console.error(' Disconnect error:', error);
+        }
+    }
 });
 
-log('Client ready');
+window.addEventListener('beforeunload', () => {
+    if (client && isConnected) {
+        client.disconnect();
+    }
+});
+
+console.log(' Client ready');
