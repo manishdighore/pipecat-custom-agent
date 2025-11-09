@@ -17,6 +17,7 @@ let isConnected = false;
 let currentUserMessage = null;
 let currentAgentMessage = null;
 let botAudio = null;
+let lastUserText = '';  // Track last user text to prevent duplicates
 
 function formatTime() {
     const now = new Date();
@@ -90,18 +91,26 @@ startBtn.addEventListener('click', async () => {
                     const text = data.text || '';
                     const isFinal = data.final || false;
                     
-                    // Skip final transcripts - we'll finalize on UserStoppedSpeaking
-                    if (isFinal) {
+                    if (!text) return;
+                    
+                    // Skip if this is the same text we just saw (prevents duplicates)
+                    if (isFinal && text === lastUserText) {
                         return;
                     }
                     
-                    if (text) {
-                        // Only show partial/streaming transcripts
-                        if (!currentUserMessage) {
-                            currentUserMessage = addMessage(text, 'user', true);
-                        } else {
-                            updateMessage(currentUserMessage, text, true);
-                        }
+                    // Skip final transcripts - we finalize on UserStoppedSpeaking
+                    if (isFinal) {
+                        lastUserText = text;
+                        return;
+                    }
+                    
+                    // Only show partial/streaming transcripts
+                    if (!currentUserMessage) {
+                        currentUserMessage = addMessage(text, 'user', true);
+                        lastUserText = text;
+                    } else {
+                        updateMessage(currentUserMessage, text, true);
+                        lastUserText = text;
                     }
                 },
                 onBotTranscript: (data) => {
@@ -129,7 +138,9 @@ startBtn.addEventListener('click', async () => {
                 onUserStoppedSpeaking: () => {
                     speakingIndicator.classList.remove('active');
                     if (currentUserMessage) {
-                        currentUserMessage.querySelector('.message-bubble').classList.remove('streaming');
+                        const bubble = currentUserMessage.querySelector('.message-bubble');
+                        bubble.classList.remove('streaming');
+                        lastUserText = bubble.textContent;  // Save final text
                         currentUserMessage = null;
                     }
                 },
@@ -210,6 +221,7 @@ endBtn.addEventListener('click', async () => {
             messagesContainer.innerHTML = '';
             currentUserMessage = null;
             currentAgentMessage = null;
+            lastUserText = '';  // Reset duplicate tracker
             speakingIndicator.classList.remove('active');
             startBtn.disabled = false;
             startBtn.textContent = 'Start Session';
