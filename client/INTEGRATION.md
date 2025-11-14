@@ -65,8 +65,15 @@ onUserTranscript: (data) => {
 **Event Schema:**
 ```typescript
 {
-    text: string;      // Transcribed text
-    final: boolean;    // true = final version, false = partial/streaming
+    text: string;       // Transcribed text
+    final: boolean;     // true = final version, false = partial/streaming
+    user_id: string;    // User identifier
+    timestamp: string;  // ISO timestamp
+    // Custom fields (if using CustomRTVIObserver):
+    session_id?: string;   // Session identifier
+    metadata?: {           // Custom metadata
+        [key: string]: any;
+    };
 }
 ```
 
@@ -101,6 +108,11 @@ onBotTtsText: (data) => {
 ```typescript
 {
     text: string;  // Text chunk from TTS
+    // Custom fields (if using CustomRTVIObserver):
+    session_id?: string;   // Session identifier
+    metadata?: {           // Custom metadata
+        [key: string]: any;
+    };
 }
 ```
 
@@ -470,6 +482,83 @@ function finalizeMessage(element) {
 - Scroll container to bottom after each update
 - Don't batch DOM updates
 
+## Custom Fields in Events
+
+This server implementation supports custom fields in RTVI events (like `session_id`).
+
+### Accessing Custom Fields
+
+```javascript
+onUserTranscript: (data) => {
+    const text = data.text || '';
+    const sessionId = data.session_id;  // Custom field
+    const metadata = data.metadata;      // Custom metadata object
+    
+    if (sessionId) {
+        // Track by session
+        console.log(`[Session ${sessionId}] User: ${text}`);
+        
+        // Send to analytics
+        analytics.track('user_message', {
+            session: sessionId,
+            text: text,
+            metadata: metadata
+        });
+    }
+},
+
+onBotTtsText: (data) => {
+    const text = data.text || '';
+    const sessionId = data.session_id;  // Custom field
+    
+    if (sessionId) {
+        console.log(`[Session ${sessionId}] Bot: ${text}`);
+    }
+}
+```
+
+### TypeScript Types
+
+```typescript
+interface CustomUserTranscriptData {
+    text: string;
+    user_id: string;
+    timestamp: string;
+    final: boolean;
+    // Custom fields
+    session_id?: string;
+    metadata?: {
+        [key: string]: any;
+    };
+}
+
+interface CustomBotTtsTextData {
+    text: string;
+    // Custom fields
+    session_id?: string;
+    metadata?: {
+        [key: string]: any;
+    };
+}
+
+// Use in callbacks
+const client = new PipecatClient({
+    callbacks: {
+        onUserTranscript: (data: CustomUserTranscriptData) => {
+            console.log('Session:', data.session_id);
+            console.log('Metadata:', data.metadata);
+        }
+    }
+});
+```
+
+### Use Cases
+
+1. **Session Tracking** - Track conversation flows across multiple messages
+2. **Analytics** - Correlate events with user segments and experiments
+3. **Multi-Tenancy** - Identify which organization events belong to
+4. **Debugging** - Trace issues with unique session identifiers
+
 ## Server-Side Requirements
 
 Your Pipecat server must:
@@ -477,9 +566,11 @@ Your Pipecat server must:
 2. Include `RTVIProcessor` in the pipeline for event emission
 3. Position `RTVIProcessor` before LLM to capture transcript events
 4. Use Azure STT/TTS or compatible services
+5. (Optional) Use `CustomRTVIObserver` for custom event fields - see `CUSTOM_RTVI_FIELDS.md`
 
 ## Further Reading
 
 - [Pipecat Client SDK Docs](https://docs.pipecat.ai/client/js)
 - [RTVI Protocol](https://docs.pipecat.ai/client/js/rtvi)
 - [WebSocket Transport](https://docs.pipecat.ai/client/js/transports/websocket)
+- [Custom RTVI Fields](../CUSTOM_RTVI_FIELDS.md) - Server-side implementation guide

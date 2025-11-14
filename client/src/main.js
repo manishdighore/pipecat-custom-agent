@@ -86,52 +86,55 @@ startBtn.addEventListener('click', async () => {
             transport: new WebSocketTransport(),
             enableCam: false,
             enableMic: true,
-            callbacks: {
-                onUserTranscript: (data) => {
-                    const text = data.text || '';
-                    const isFinal = data.final || false;
-                    
-                    if (!text) return;
-                    
-                    // Skip if this is the same text we just saw (prevents duplicates)
-                    if (isFinal && text === lastUserText) {
-                        return;
-                    }
-                    
-                    // Skip final transcripts - we finalize on UserStoppedSpeaking
-                    if (isFinal) {
-                        lastUserText = text;
-                        return;
-                    }
-                    
-                    // Only show partial/streaming transcripts
-                    if (!currentUserMessage) {
-                        currentUserMessage = addMessage(text, 'user', true);
-                        lastUserText = text;
+        callbacks: {
+            onBotLlmText: (data) => {
+                const text = data.text || '';
+                console.log('🤖 LLM:', text, 'session:', data.session_id?.substring(0, 8));
+                
+                if (text) {
+                    // Stream LLM text - accumulate in one message
+                    if (!currentAgentMessage) {
+                        currentAgentMessage = addMessage(text, 'agent', true);
                     } else {
-                        updateMessage(currentUserMessage, text, true);
-                        lastUserText = text;
+                        const currentText = currentAgentMessage.querySelector('.message-bubble').textContent;
+                        updateMessage(currentAgentMessage, currentText + ' ' + text, true);
                     }
-                },
-                onBotTranscript: (data) => {
-                    // Not used
-                },
-                onBotLlmText: (data) => {
-                    // Not used
-                },
-                onBotTtsText: (data) => {
-                    const text = data.text || '';
-                    
-                    if (text) {
-                        // Stream TTS text - accumulate in one message
-                        if (!currentAgentMessage) {
-                            currentAgentMessage = addMessage(text, 'agent', true);
-                        } else {
-                            const currentText = currentAgentMessage.querySelector('.message-bubble').textContent;
-                            updateMessage(currentAgentMessage, currentText + ' ' + text, true);
-                        }
+                }
+            },
+            
+            onUserTranscript: (data) => {
+                const text = data.text || '';
+                const isFinal = data.final || false;
+                
+                if (!text) return;
+                
+                // Console log for user transcripts
+                if (!isFinal) {
+                    console.log('👤 User (streaming):', text, 'session:', data.session_id?.substring(0, 8));
+                }
+                
+                // Skip all final transcripts - we finalize on UserStoppedSpeaking
+                if (isFinal) {
+                    return;
+                }
+                
+                // Only show partial/streaming transcripts
+                if (!currentUserMessage) {
+                    // Only create new message if text is different from last completed message
+                    if (text !== lastUserText) {
+                        currentUserMessage = addMessage(text, 'user', true);
                     }
-                },
+                } else {
+                    updateMessage(currentUserMessage, text, true);
+                }
+            },
+            onBotTranscript: (data) => {
+                // Not used
+            },
+            onBotTtsText: (data) => {
+                // Just log TTS events, LLM streaming handles display
+                console.log('🔊 TTS:', data.text, 'session:', data.session_id?.substring(0, 8));
+            },
                 onUserStartedSpeaking: () => {
                     speakingIndicator.classList.add('active');
                 },
@@ -142,6 +145,10 @@ startBtn.addEventListener('click', async () => {
                         bubble.classList.remove('streaming');
                         lastUserText = bubble.textContent;  // Save final text
                         currentUserMessage = null;
+                    } else {
+                        // Even if no message was created, clear lastUserText for next turn
+                        // This ensures a new user turn creates a fresh message
+                        lastUserText = '';
                     }
                 },
                 onBotStartedSpeaking: () => {
@@ -182,15 +189,7 @@ startBtn.addEventListener('click', async () => {
             }
         });
         
-        // Log ONLY bot and user events to debug transcript issues
-        const botUserEvents = Object.values(RTVIEvent).filter(e => 
-            e.includes('Bot') || e.includes('User') || e.includes('Transcript')
-        );
-        botUserEvents.forEach(eventName => {
-            client.on(eventName, (...args) => {
-                console.log(`🎯 ${eventName}:`, ...args);
-            });
-        });
+
         
         // Initialize devices first
         console.log('🎙️ Initializing devices...');

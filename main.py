@@ -5,6 +5,8 @@ Pipecat Voice Agent with Azure STT/TTS and Custom LLM over FastAPI WebSocket
 import os
 import sys
 import logging
+import time
+import uuid
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -33,6 +35,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
 
 from custom_llm import CustomTextStreamLLM
+from custom_rtvi_observer import CustomRTVIObserver, GlobalFieldInjectorObserver
 
 # Load environment variables
 load_dotenv()
@@ -103,10 +106,7 @@ async def run_voice_agent(websocket: WebSocket):
     rtvi = RTVIProcessor(
         config=RTVIConfig(
             config=[
-                {
-                    "service": "tts",
-                    "options": [{"name": "voice", "value": "en-US-AvaMultilingualNeural"}]
-                }
+
             ]
         )
     )
@@ -139,14 +139,40 @@ async def run_voice_agent(websocket: WebSocket):
         ]
     )
     
-    # Create pipeline task
+    # Generate a unique session ID for this connection
+    session_id = str(uuid.uuid4())
+    
+    logger.info(f"Session ID: {session_id}")
+    
+    # Create custom RTVI observer with session_id and metadata
+    # Option 1: Use CustomRTVIObserver for specific control over which events get custom fields
+    custom_observer = CustomRTVIObserver(
+        rtvi,
+        session_id=session_id,
+        custom_metadata={
+            "connection_time": time.time(),
+            "user_agent": "pipecat-voice-agent"
+        }
+    )
+    
+    # Option 2: Use GlobalFieldInjectorObserver to inject fields into ALL messages
+    # Uncomment this and comment out the CustomRTVIObserver above to use this approach:
+    # custom_observer = GlobalFieldInjectorObserver(
+    #     rtvi,
+    #     inject_fields={
+    #         "session_id": session_id,
+    #         "connection_time": time.time()
+    #     }
+    # )
+    
+    # Create pipeline task with custom observer
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        observers=[RTVIObserver(rtvi)],
+        observers=[custom_observer],
     )
     
     # Set up RTVI event handler for client ready

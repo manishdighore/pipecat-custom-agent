@@ -11,11 +11,12 @@ from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMTextFrame,
     TextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
-
+import time
 
 class CustomTextStreamLLM(LLMService):
     """
@@ -53,7 +54,12 @@ class CustomTextStreamLLM(LLMService):
         user_lower = user_message.lower()
         
         if "hello" in user_lower or "hi" in user_lower:
-            response = "Hello! How can I help you today? I'm here to assist you with any questions you might have."
+            response = (
+                "Hello! How can I help you today? I'm here to assist you with any questions you might have. "
+                "Whether you need information, advice, or just want to chat, feel free to ask me anything. "
+                "I'm always ready to help make your experience enjoyable and productive. "
+                "Is there something specific you'd like to talk about or learn more about today?"
+            )
         elif "how are you" in user_lower:
             response = "I'm doing great, thank you for asking! I'm an AI assistant ready to help you. How are you doing?"
         elif "weather" in user_lower:
@@ -83,23 +89,17 @@ class CustomTextStreamLLM(LLMService):
         # Import here to avoid circular imports
         from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
         
-        logger.info(f"🔍 CustomLLM received: {type(frame).__name__}")
-        
         # When we receive a context frame with user input, generate a response
         if isinstance(frame, OpenAILLMContextFrame):
-            logger.info("📥 Received OpenAILLMContextFrame!")
-            
             context = frame.context
             messages = context.messages
-            logger.info(f"📝 Context has {len(messages)} messages")
             
             if messages and len(messages) > 0:
                 last_message = messages[-1]
-                logger.info(f"👤 Last message role: {last_message.get('role')}")
                 
                 if last_message.get("role") == "user":
                     user_text = last_message.get("content", "")
-                    logger.info(f"🎤 USER SAID: {user_text}")
+                    logger.info(f"🎤 User: {user_text}")
                     
                     # Add to conversation history
                     self._conversation_history.append({
@@ -107,7 +107,6 @@ class CustomTextStreamLLM(LLMService):
                         "content": user_text
                     })
                     
-                    logger.info("🤖 Generating response...")
                     # Signal start of response
                     await self.push_frame(LLMFullResponseStartFrame())
                     
@@ -115,9 +114,9 @@ class CustomTextStreamLLM(LLMService):
                     full_response = ""
                     async for text_chunk in self.generate_response(user_text):
                         full_response += text_chunk
-                        # Push each text chunk to be converted to speech
-                        logger.info(f"🔊 Sending TTS chunk: {text_chunk}")
-                        await self.push_frame(TextFrame(text_chunk))
+                        await asyncio.sleep(0.02)
+                        # Push LLMTextFrame so RTVIObserver can stream it to frontend
+                        await self.push_frame(LLMTextFrame(text_chunk))
                     
                     # Add assistant response to history
                     self._conversation_history.append({
@@ -128,7 +127,7 @@ class CustomTextStreamLLM(LLMService):
                     # Signal end of response
                     await self.push_frame(LLMFullResponseEndFrame())
                     
-                    logger.info(f"🤖 BOT RESPONSE: {full_response}")
+                    logger.info(f"🤖 Bot: {full_response}")
         else:
             # Pass through other frames
             await self.push_frame(frame, direction)
